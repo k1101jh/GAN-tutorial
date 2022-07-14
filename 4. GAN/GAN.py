@@ -14,13 +14,17 @@ class Generator(nn.Module):
         # 64, 28, 28
         # 64, 28, 28
         # 1, 28, 28
+        batch_norm_momentum = 0.9
+        
         self.linear = nn.Linear(100, 3136)
+        self.batch_norm = nn.BatchNorm1d(3136, momentum=batch_norm_momentum)
+        self.relu = nn.ReLU(inplace=True)
         self.layers = self._make_layers(4,
                                         [2, 2, 1, 1],
                                         [64, 128, 64, 64, 1],
                                         [3, 3, 3, 3],
                                         [1, 1, 1, 1],
-                                        0.9, 0)
+                                        batch_norm_momentum, False)
         self.tanh = nn.Tanh()
         
     def _make_layers(self,
@@ -32,6 +36,10 @@ class Generator(nn.Module):
                      batch_norm_momentum,
                      drop_out_rate):
         layers = []
+        
+        if drop_out_rate:
+            layers.append(nn.Dropout(p=drop_out_rate))
+        
         for i in range(num_layers):
             layers.append(nn.Upsample(scale_factor=upsamples[i]))
             layers.append(nn.Conv2d(channels[i],
@@ -40,20 +48,18 @@ class Generator(nn.Module):
                                     strides[i],
                                     padding=1,
                                     bias=False))
-            # layers.append(nn.ConvTranspose2d(input_channel,
-            #                                  channels[i],
-            #                                  kernel_sizes[i],
-            #                                  strides[i],
-            #                                  bias=False))
-            layers.append(nn.BatchNorm2d(channels[i + 1],
-                                         momentum=batch_norm_momentum))
-            layers.append(nn.ReLU(inplace=True))
-            layers.append(nn.Dropout(p=drop_out_rate))
+            if i < num_layers - 1:
+                if batch_norm_momentum:
+                    layers.append(nn.BatchNorm2d(channels[i + 1],
+                                                momentum=batch_norm_momentum))
+                layers.append(nn.ReLU(inplace=True))
         
         return nn.Sequential(*layers)
     
     def forward(self, x):
         out = self.linear(x)
+        out = self.batch_norm(out)
+        out = self.relu(out)
         out = out.view(-1, 64, 7, 7)
         out = self.layers(out)
         out = self.tanh(out)
@@ -94,10 +100,12 @@ class Discriminator(nn.Module):
                                     strides[i],
                                     padding=1,
                                     bias=False))
-            layers.append(nn.BatchNorm2d(channels[i + 1],
-                                         momentum=batch_norm_momentum))
+            if batch_norm_momentum and i > 0:
+                layers.append(nn.BatchNorm2d(channels[i + 1],
+                                            momentum=batch_norm_momentum))
             layers.append(nn.ReLU(inplace=True))
-            layers.append(nn.Dropout(p=drop_out_rate))
+            if drop_out_rate:
+                layers.append(nn.Dropout(p=drop_out_rate))
             
         return nn.Sequential(*layers)
     
