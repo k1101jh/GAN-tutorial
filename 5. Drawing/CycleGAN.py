@@ -1,11 +1,10 @@
-from re import M
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 def downsample(in_channels, out_channels):
     return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1),
+        nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1),
         nn.InstanceNorm2d(out_channels),
         nn.ReLU(inplace=True)
     )
@@ -29,9 +28,83 @@ def discriminator_block(in_channels, out_channels, stride=2, use_norm=True):
         
     return nn.Sequential(*layers)
 
-class Generator(nn.Module):
+def init_weight_randn(submodule):
+    if isinstance(submodule, nn.Conv2d) or isinstance(submodule, nn.Linear) or isinstance(submodule, nn.ConvTranspose2d):
+        torch.nn.init.normal_(submodule.weight, mean=0.0, std=0.02)
+
+
+class ConvBlock(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 final=False):
+        super(ConvBlock, self).__init__()
+
+        layer_list = []
+        layer_list.append(nn.Conv2d(in_channels, out_channels, kernel_size=7, stride=1, padding=3, padding_mode='reflect'))
+        if final:
+            layer_list.append(nn.Tanh())
+        else:
+            layer_list.append(nn.InstanceNorm2d(out_channels))
+            layer_list.append(nn.ReLU(inplace=True))
+            
+        self.layers = nn.Sequential(*layer_list)
+        self.layers.apply(init_weight_randn)
+    
+    def forward(self, x):
+        return self.layers(x)
+
+
+class DownsampleBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(DownsampleBlock, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.layers.apply(init_weight_randn)
+        
+    def forward(self, x):
+        return self.layers(x)
+
+
+class UpsampleBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(UpsampleBlock, self).__init__()
+        self.layers = nn.Sequential(
+            nn.ConvTranspose2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.layers.apply(init_weight_randn)
+        
+    def forward(self, x):
+        return self.layers(x)
+
+class ResidualBlock(nn.Module):
+    def __init__(self, num_channels):
+        super(ResidualBlock, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1, padding_mode='reflect', bias=False),
+            nn.InstanceNorm2d(num_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1, padding_mode='reflect', bias=False),
+            nn.InstanceNorm2d(num_channels),
+        )
+        
+        self.layers.apply(init_weight_randn)
+        
+    def forward(self, x):
+        out = self.layers(x)
+        out = out + x
+        return out
+
+class GeneratorUNet(nn.Module):
     def __init__(self, dropout_rate=0):
-        super(Generator, self).__init__()
+        super(GeneratorUNet, self).__init__()
         
         channels = [3, 32, 64, 128, 256]
         
@@ -41,11 +114,11 @@ class Generator(nn.Module):
         self.downsample4 = downsample(channels[3], channels[4])
         
         self.upsample1 = upsample(channels[4], channels[3])
-        self.upsample2 = upsample(channels[3], channels[2])
-        self.upsample3 = upsample(channels[2], channels[1])
+        self.upsample2 = upsample(channels[3] * 2, channels[2])
+        self.upsample3 = upsample(channels[2] * 2, channels[1])
         self.upsample4 = nn.Upsample(scale_factor=2)
         
-        self.last_conv = nn.Conv2d(channels[1], channels[0], kernel_size=3, padding=1)
+        self.last_conv = nn.Conv2d(channels[1] * 2, channels[0], kernel_size=3, padding=1)
         self.tanh = nn.Tanh()
         
     def forward(self, x):
@@ -54,14 +127,43 @@ class Generator(nn.Module):
         down3 = self.downsample3(down2)
         down4 = self.downsample4(down3)
         
-        up1 = self.upsample1(down4)
-        up2 = self.upsample2(up1)
-        up3 = self.upsample3(up2)
+        up1 = torch.cat([self.upsample1(down4), down3], dim=1)
+        up2 = torch.cat([self.upsample2(up1), down2], dim=1)
+        up3 = torch.cat([self.upsample3(up2), down1], dim=1)
         up4 = self.upsample4(up3)
         
         out = self.last_conv(up4)
         out = self.tanh(out)
         return out
+    
+    
+class GeneratorResNet(nn.Module):
+    def __init__(self):
+        super(GeneratorResNet, self).__init__()
+        
+        channels = [3, 32, 64, 128]
+        
+        self.layers = nn.Sequential(
+            ConvBlock(channels[0], channels[1], False),
+            DownsampleBlock(channels[1], channels[2]),
+            DownsampleBlock(channels[2], channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            ResidualBlock(channels[3]),
+            UpsampleBlock(channels[3], channels[2]),
+            UpsampleBlock(channels[2], channels[1]),
+            ConvBlock(channels[1], channels[0], True),
+        )   
+        
+    def forward(self, x):
+        return self.layers(x)
+    
     
 class Discriminator(nn.Module):
     def __init__(self):
