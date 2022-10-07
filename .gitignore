@@ -5,6 +5,7 @@
 **/data/
 **/images/
 *.pth
+*.AppImage
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

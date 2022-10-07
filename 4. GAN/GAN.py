@@ -2,10 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def init_weight_randn(submodule):
+    if isinstance(submodule, nn.Conv2d) or isinstance(submodule, nn.Linear):
+        torch.nn.init.normal_(submodule.weight, mean=0.0, std=0.02)
+
 class Generator(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self):
         super(Generator, self).__init__()
-        self.ngpu = ngpu
         # 100
         # 3236
         # 64, 7, 7
@@ -26,6 +29,9 @@ class Generator(nn.Module):
                                         [1, 1, 1, 1],
                                         batch_norm_momentum, False)
         self.tanh = nn.Tanh()
+        
+        self.linear.apply(init_weight_randn)
+        self.layers.apply(init_weight_randn)
         
     def _make_layers(self,
                      num_layers,
@@ -66,9 +72,8 @@ class Generator(nn.Module):
         return out
     
 class Discriminator(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self):
         super(Discriminator, self).__init__()
-        self.ngpu = ngpu
         # 1, 28, 28
         # 64, 14, 14
         # 64, 7, 7
@@ -84,6 +89,9 @@ class Discriminator(nn.Module):
         self.flatten = nn.Flatten()
         self.linear = nn.Linear(2048, 1)
         self.sigmoid = nn.Sigmoid()
+        
+        self.linear.apply(init_weight_randn)
+        self.layers.apply(init_weight_randn)
         
     def _make_layers(self,
                      num_layers,
