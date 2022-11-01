@@ -23,7 +23,6 @@ class Attention(nn.Module):
         e = self.tanh(e)
         e = e.view(-1, self.seq_len)
         alpha = self.softmax(e)
-        # alpha_repeated = alpha.unsqueeze(2).repeat(1, 1, self.hidden_size)
         
         c = x.mul(alpha.unsqueeze(-1))
         c = c.sum(axis=1)
@@ -62,14 +61,18 @@ class RNNAttention(nn.Module):
     def forward(self, x):
         embed1 = self.embedding1(x[0])
         embed2 = self.embedding2(x[1])
+        # out shape: (batch_size, seq_len, 2 * embed_size)
         out = torch.cat([embed1, embed2], dim=2)
         
-        # out = (output, (hidden state, cell state))
+        # out shape: (batch_size, seq_len, rnn_units)
         out, _ = self.lstm(out)
+        # out shape: (batch_size, rnn_units)
         out, alpha = self.layer1(out)
         
+        # notes_out shape: (batch_size, n_notes)
         notes_out = self.linear1(out)
         
+        # notes_out shape: (batch_size, n_durations)
         durations_out = self.linear2(out)
             
         return [notes_out, durations_out], alpha

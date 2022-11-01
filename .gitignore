@@ -4,6 +4,7 @@
 .vscode/
 **/data/
 **/images/
+**/output/
 *.pth
 *.AppImage
 
